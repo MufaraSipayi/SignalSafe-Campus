@@ -1,0 +1,287 @@
+import streamlit as st
+import joblib
+import re
+from datetime import datetime
+from urllib.parse import urlparse
+
+st.set_page_config(
+    page_title="SignalSafe Campus",
+    page_icon="🛡️",
+    layout="wide"
+)
+
+# Load existing ML model
+@st.cache_resource
+def load_model():
+    bundle = joblib.load("signalsafe_model.pkl")
+    return bundle["model"], bundle["vectorizer"]
+
+try:
+    model, vectorizer = load_model()
+except Exception as e:
+    st.error(f"Model loading failed: {e}")
+    st.stop()
+
+# Session history
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+st.title("🛡️ SignalSafe-Campus")
+st.subheader("Smart Campus Digital Safety Platform")
+st.write(
+    "Check suspicious messages, links and digital threats "
+    "with your campus safety assistant."
+)
+
+# Sidebar navigation
+page = st.sidebar.radio(
+    "Navigation",
+    [
+        "Home",
+        "Message Scanner",
+        "URL Checker",
+        "UPI Safety",
+        "QR Safety Guide",
+        "Scholarship Safety",
+        "Dashboard"
+    ]
+)
+
+def scan_message(message):
+    vector = vectorizer.transform([message])
+    prediction = model.predict(vector)[0]
+
+    confidence = None
+    if hasattr(model, "predict_proba"):
+        confidence = float(max(model.predict_proba(vector)[0])) * 100
+
+    return prediction, confidence
+
+# HOME
+if page == "Home":
+    st.header("Welcome to SignalSafe Campus")
+    st.info(
+        "Protect yourself from suspicious messages, "
+        "fraudulent links and online scams."
+    )
+
+    st.markdown("""
+    ### Available features
+
+    - Message scam detection
+    - Suspicious URL checks
+    - UPI safety awareness
+    - QR code safety guidance
+    - Scholarship fraud awareness
+    - Scan statistics dashboard
+    """)
+
+    st.button(
+        "Open Message Scanner",
+        on_click=lambda: st.session_state.update(
+            navigation="Message Scanner"
+        )
+    )
+
+# MESSAGE SCANNER
+elif page == "Message Scanner":
+    st.header("📩 Message Scam Detector")
+
+    message = st.text_area(
+        "Paste your suspicious message",
+        placeholder="Enter the message here..."
+    )
+
+    if st.button("Check Message"):
+        if message.strip():
+            try:
+                prediction, confidence = scan_message(message)
+
+                st.session_state.history.append({
+                    "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "message": message,
+                    "prediction": str(prediction),
+                    "confidence": confidence
+                })
+
+                if str(prediction).lower() in [
+                    "scam", "spam", "fraud"
+                ]:
+                    st.error("⚠️ Suspicious message detected")
+                else:
+                    st.success("No scam detected by the model")
+
+                if confidence is not None:
+                    st.write(f"Model confidence: {confidence:.2f}%")
+
+                st.caption(
+                    "Machine-learning predictions can be wrong. "
+                    "Never rely on this result alone."
+                )
+
+            except Exception as e:
+                st.error(f"Scanning error: {e}")
+        else:
+            st.warning("Please enter a message.")
+
+# URL CHECKER
+elif page == "URL Checker":
+    st.header("🔗 Suspicious URL Checker")
+
+    url = st.text_input("Enter website URL")
+
+    if st.button("Check URL"):
+        candidate = url.strip()
+
+        if not candidate:
+            st.warning("Enter a URL first.")
+        else:
+            parsed = urlparse(
+                candidate if "://" in candidate
+                else "https://" + candidate
+            )
+
+            host = parsed.hostname or ""
+
+            if (
+                not host
+                or "." not in host
+                or " " in host
+            ):
+                st.error("Invalid URL format.")
+            else:
+                suspicious = (
+                    parsed.scheme != "https"
+                    or "@" in candidate
+                    or any(
+                        word in host.lower()
+                        for word in [
+                            "verify-account",
+                            "free-gift",
+                            "claim-prize"
+                        ]
+                    )
+                )
+
+                if suspicious:
+                    st.warning(
+                        "This URL has warning signs. "
+                        "Do not enter personal information."
+                    )
+                else:
+                    st.info(
+                        "No basic warning signs found. "
+                        "This does not prove the site is safe."
+                    )
+
+                st.write("Domain:", host)
+
+# UPI SAFETY
+elif page == "UPI Safety":
+    st.header("💳 UPI Fraud Awareness")
+
+    st.markdown("""
+    ### Common UPI warning signs
+
+    - Someone asks for your UPI PIN to receive money.
+    - A stranger asks you to scan a QR code to receive payment.
+    - Someone requests screen sharing or remote access.
+    - You receive unexpected collect-payment requests.
+    - A caller pressures you to act immediately.
+
+    **Remember:** Never share your UPI PIN or OTP.
+    """)
+
+    st.info(
+        "You do not need to enter your UPI PIN to receive money."
+    )
+
+# QR SAFETY
+elif page == "QR Safety Guide":
+    st.header("📷 QR Code Safety")
+
+    st.markdown("""
+    Before scanning a QR code:
+
+    1. Check who provided the QR code.
+    2. Verify the displayed recipient name.
+    3. Check the payment amount.
+    4. Never approve an unexpected payment.
+    5. Never enter your UPI PIN to receive money.
+
+    This version provides safety guidance, not automatic QR analysis.
+    """)
+
+# SCHOLARSHIP SAFETY
+elif page == "Scholarship Safety":
+    st.header("🎓 Scholarship Link Safety")
+
+    link = st.text_input("Enter scholarship website URL")
+
+    if st.button("Review Scholarship Link"):
+        if link.strip():
+            parsed = urlparse(
+                link if "://" in link else "https://" + link
+            )
+
+            host = parsed.hostname or ""
+
+            if not host or "." not in host:
+                st.error("Invalid URL.")
+            elif parsed.scheme != "https":
+                st.warning("The link does not use HTTPS.")
+            else:
+                st.info(
+                    "HTTPS alone does not establish legitimacy. "
+                    "Verify the scholarship through the official "
+                    "government or institution website."
+                )
+        else:
+            st.warning("Please enter a link.")
+
+# DASHBOARD
+elif page == "Dashboard":
+    st.header("📊 Safety Dashboard")
+
+    history = st.session_state.history
+
+    total = len(history)
+    scams = sum(
+        1 for item in history
+        if item["prediction"].lower() in [
+            "scam", "spam", "fraud"
+        ]
+    )
+    safe = total - scams
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("Total Scans", total)
+    col2.metric("Suspicious Predictions", scams)
+    col3.metric("Other Predictions", safe)
+
+    st.subheader("Recent Scan History")
+
+    if history:
+        for item in reversed(history):
+            with st.expander(
+                f'{item["time"]} | {item["prediction"]}'
+            ):
+                st.write(item["message"])
+                if item["confidence"] is not None:
+                    st.write(
+                        f'Confidence: {item["confidence"]:.2f}%'
+                    )
+    else:
+        st.info("No scans performed yet.")
+
+    if st.button("Clear Scan History"):
+        st.session_state.history = []
+        st.rerun()
+
+st.divider()
+
+st.caption(
+    "SignalSafe-Campus | Educational demonstration. "
+    "Always verify suspicious messages independently."
+)
